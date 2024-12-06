@@ -8,9 +8,15 @@ interface InputAreaProps {
   onPrimeSelect: (prime: number) => void;
   currentNumber: number;
   availablePrimes: number[];
+  disabled?: boolean;  // この行を追加
 }
 
-export const InputArea = ({ onPrimeSelect, availablePrimes }: InputAreaProps) => {
+export const InputArea = ({ 
+  onPrimeSelect, 
+  currentNumber,
+  availablePrimes,
+  disabled = false 
+}: InputAreaProps) => {
   return (
     <div className="space-y-4 w-full max-w-md">
       <Card>
@@ -22,7 +28,7 @@ export const InputArea = ({ onPrimeSelect, availablePrimes }: InputAreaProps) =>
                 number={prime}
                 isSelected={false}
                 onClick={() => onPrimeSelect(prime)}
-                disabled={false}
+                disabled={disabled}
               />
             ))}
           </div>
