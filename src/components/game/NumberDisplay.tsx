@@ -13,6 +13,8 @@ interface NumberDisplayProps {
     number: number;
     usedPrime: number;
   }[];
+  isTransitioning?: boolean;  // この行を追加
+
 }
 
 export const NumberDisplay = ({

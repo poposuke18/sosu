@@ -1,11 +1,14 @@
-// src/components/game/GameBoard.tsx
 "use client"
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { StatusBar } from './StatusBar';
 import { NumberDisplay } from './NumberDisplay';
 import { InputArea } from './InputArea';
 import { GameOver } from './GameOver';
+import { useAudio } from '@/components/AudioManager';
+import { Button } from "@/components/ui/button";
+import { INITIAL_LIVES, getTimeLimit } from '@/lib/gameConfig';
+import { useGameTimer } from '@/hooks/useGameTimer';
 import { 
   createStage, 
   processPlayerAction, 
@@ -14,75 +17,139 @@ import {
 } from '@/lib/gameLogic';
 
 export const GameBoard = () => {
-  const [playerHealth, setPlayerHealth] = useState(1000);
+  const [lives, setLives] = useState(INITIAL_LIVES);
   const [score, setScore] = useState(0);
-  const [currentStage, setCurrentStage] = useState<GameStage | null>(null);
+  const [currentStage, setCurrentStage] = useState<GameStage>(createStage(1));
   const [message, setMessage] = useState('');
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [isTimeUp, setIsTimeUp] = useState(false);
+  const { playBGM, playEffect } = useAudio();
 
-  // 初期化
-  useEffect(() => {
-    setCurrentStage(createStage(1));
-  }, []);
+  const handleTimeUp = useCallback(() => {
+    setIsTimeUp(true);
+    playEffect('wrong');
+    setLives(prev => {
+      const newLives = prev - 1;
+      if (newLives > 0) {
+        setTimeout(() => {
+          setIsTimeUp(false);
+          setCurrentStage(createStage(currentStage.stageNumber));
+          setMessage('');
+        }, 1500);
+      }
+      return newLives;
+    });
+    setMessage('タイムアップ！');
+  }, [currentStage.stageNumber, playEffect]);
 
-  // メッセージクリアのタイマー
-  useEffect(() => {
-    if (!message) return;
+  const { timeLeft, startTimer, clearTimer } = useGameTimer({
+    stageNumber: currentStage.stageNumber,
+    isGameStarted: gameStarted,
+    isTimeUp,
+    isTransitioning,
+    onTimeUp: handleTimeUp,
+  });
 
-    const timer = setTimeout(() => {
+  const handleGameStart = useCallback(() => {
+    setGameStarted(true);
+    setLives(INITIAL_LIVES);
+    setIsTimeUp(false);
+    playBGM();
+  }, [playBGM]);
+
+  const handleStageTransition = useCallback(() => {
+    setIsTransitioning(true);
+    clearTimer();
+    playEffect('stageClear');
+    setMessage('ステージクリア！');
+
+    const nextStage = createStage(currentStage.stageNumber + 1);
+
+    setTimeout(() => {
+      setCurrentStage(nextStage);
+      setIsTransitioning(false);
       setMessage('');
       setIsAnimating(false);
-    }, message.includes('ステージクリア') ? 1500 : 800);
-
-    return () => clearTimeout(timer);
-  }, [message]);
+      setIsTimeUp(false);
+      startTimer(getTimeLimit(nextStage.stageNumber));
+    }, 800);
+  }, [currentStage.stageNumber, playEffect, clearTimer, startTimer]);
 
   const handlePrimeSelect = useCallback((prime: number) => {
-    if (!currentStage) return;
+    if (isTransitioning || isTimeUp) return;
 
     const result = processPlayerAction(currentStage, prime);
 
     if (result.isValid) {
       setIsAnimating(true);
+      playEffect('correct');
+      
       const newHistory = [...currentStage.history, {
         number: currentStage.currentNumber,
         usedPrime: prime
       }];
 
       if (result.nextNumber === 1) {
-        // ステージクリア
+        // 問題解決時のみステージ遷移とタイマーリセット
         setScore(prev => prev + currentStage.targetNumber);
-        setMessage('ステージクリア！');
-        setCurrentStage(prev => prev ? createStage(prev.stageNumber + 1) : null);
+        handleStageTransition();
       } else {
-        // 正しい素因数分解
-        setCurrentStage(prev => prev ? {
+        // 途中経過の場合はタイマーはそのまま
+        setCurrentStage(prev => ({
           ...prev,
           currentNumber: result.nextNumber,
           history: newHistory
-        } : null);
+        }));
         setMessage('正解！');
+        setTimeout(() => {
+          setMessage('');
+          setIsAnimating(false);
+        }, 400);
       }
     } else {
-      // 間違った素因数選択
-      setPlayerHealth(prev => Math.max(0, prev - result.damage));
-      setMessage(`不正解... ${result.damage}ダメージ！`);
+      playEffect('wrong');
+      setLives(prev => prev - 1);
+      setMessage('不正解！');
+      
+      setTimeout(() => {
+        setMessage('');
+        setIsAnimating(false);
+      }, 1000);
     }
-  }, [currentStage]);
+  }, [currentStage, isTransitioning, isTimeUp, playEffect, handleStageTransition]);
+
 
   const handleRetry = useCallback(() => {
-    setPlayerHealth(1000);
+    setLives(INITIAL_LIVES);
     setScore(0);
     setCurrentStage(createStage(1));
     setMessage('');
     setIsAnimating(false);
-  }, []);
+    setIsTransitioning(false);
+    setIsTimeUp(false);
+    handleGameStart();
+  }, [handleGameStart]);
 
-  // 初期ローディング
   if (!currentStage) {
     return <div className="flex min-h-screen items-center justify-center">
       <div className="text-2xl">Loading...</div>
     </div>;
+  }
+
+  if (!gameStarted) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-900 via-purple-700 to-pink-800 p-4">
+        <h1 className="text-4xl font-bold text-white mb-8">Prime Factor Heroes</h1>
+        <Button 
+          onClick={handleGameStart}
+          className="px-8 py-4 text-xl bg-purple-500 hover:bg-purple-600 text-white"
+        >
+          ゲームを始める
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -92,26 +159,29 @@ export const GameBoard = () => {
       </div>
 
       <StatusBar 
-        health={playerHealth} 
-        score={score} 
-        maxHealth={1000}
+        lives={lives}
+        score={score}
+        timeLeft={timeLeft}
       />
 
       <NumberDisplay 
         currentNumber={currentStage.currentNumber}
         isAnimating={isAnimating}
         message={message}
-        history={currentStage.history} initialNumber={0}      />
+        history={currentStage.history}
+        initialNumber={currentStage.targetNumber}
+      />
 
       <InputArea 
         onPrimeSelect={handlePrimeSelect}
         currentNumber={currentStage.currentNumber}
         availablePrimes={getAvailablePrimes(currentStage.stageNumber)}
+        disabled={isTransitioning || isTimeUp}
       />
 
-      {playerHealth <= 0 && (
+      {(lives <= 0 || (isTimeUp && lives <= 0)) && (
         <GameOver 
-          score={score} 
+          score={score}
           stage={currentStage.stageNumber}
           onRetry={handleRetry}
         />
