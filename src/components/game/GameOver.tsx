@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 interface GameOverProps {
   score: number;
   onRetry: () => void;
+  stage: number;  // この行を追加
+
 }
 
 export const GameOver = ({ score, onRetry }: GameOverProps) => {

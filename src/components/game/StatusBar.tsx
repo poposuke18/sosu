@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 interface StatusBarProps {
   health: number;
   score: number;
+  maxHealth: number;  // 追加
 }
 
 export const StatusBar = ({ health, score }: StatusBarProps) => {

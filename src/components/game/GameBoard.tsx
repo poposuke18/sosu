@@ -1,92 +1,120 @@
 // src/components/game/GameBoard.tsx
-
 "use client"
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { StatusBar } from './StatusBar';
 import { NumberDisplay } from './NumberDisplay';
 import { InputArea } from './InputArea';
 import { GameOver } from './GameOver';
-import { getRandomQuestion, checkAnswer } from '@/lib/gameQuestions';
-import type { GameQuestion } from '@/types/game';
+import { 
+  createStage, 
+  processPlayerAction, 
+  getAvailablePrimes,
+  type GameStage 
+} from '@/lib/gameLogic';
 
 export const GameBoard = () => {
-  const [playerHealth, setPlayerHealth] = useState(100);
+  const [playerHealth, setPlayerHealth] = useState(1000);
   const [score, setScore] = useState(0);
-  const [currentQuestion, setCurrentQuestion] = useState<GameQuestion | null>(null);
+  const [currentStage, setCurrentStage] = useState<GameStage | null>(null);
   const [message, setMessage] = useState('');
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const generateNewQuestion = useCallback(() => {
-    let difficulty: 'easy' | 'medium' | 'hard';
-    if (score < 300) difficulty = 'easy';
-    else if (score < 700) difficulty = 'medium';
-    else difficulty = 'hard';
-
-    setCurrentQuestion(getRandomQuestion(difficulty));
-  }, [score]);
-
+  // 初期化
   useEffect(() => {
-    generateNewQuestion();
-  }, [generateNewQuestion]);
+    setCurrentStage(createStage(1));
+  }, []);
 
-  const handleAnswer = (selectedFactors: number[]) => {
-    if (!currentQuestion) return;
+  // メッセージクリアのタイマー
+  useEffect(() => {
+    if (!message) return;
 
-    if (checkAnswer(currentQuestion, selectedFactors)) {
+    const timer = setTimeout(() => {
+      setMessage('');
+      setIsAnimating(false);
+    }, message.includes('ステージクリア') ? 1500 : 800);
+
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  const handlePrimeSelect = useCallback((prime: number) => {
+    if (!currentStage) return;
+
+    const result = processPlayerAction(currentStage, prime);
+
+    if (result.isValid) {
       setIsAnimating(true);
-      setMessage('正解！');
-      const scoreIncrement = 
-        currentQuestion.difficulty === 'hard' ? 150 :
-        currentQuestion.difficulty === 'medium' ? 100 : 50;
-      setScore(score + scoreIncrement);
-      
-      setTimeout(() => {
-        setIsAnimating(false);
-        generateNewQuestion();
-        setMessage('');
-      }, 1500);
+      const newHistory = [...currentStage.history, {
+        number: currentStage.currentNumber,
+        usedPrime: prime
+      }];
+
+      if (result.nextNumber === 1) {
+        // ステージクリア
+        setScore(prev => prev + currentStage.targetNumber);
+        setMessage('ステージクリア！');
+        setCurrentStage(prev => prev ? createStage(prev.stageNumber + 1) : null);
+      } else {
+        // 正しい素因数分解
+        setCurrentStage(prev => prev ? {
+          ...prev,
+          currentNumber: result.nextNumber,
+          history: newHistory
+        } : null);
+        setMessage('正解！');
+      }
     } else {
-      const damage = 
-        currentQuestion.difficulty === 'hard' ? 15 :
-        currentQuestion.difficulty === 'medium' ? 10 : 5;
-      setPlayerHealth(Math.max(0, playerHealth - damage));
-      setMessage('不正解...');
+      // 間違った素因数選択
+      setPlayerHealth(prev => Math.max(0, prev - result.damage));
+      setMessage(`不正解... ${result.damage}ダメージ！`);
     }
-  };
+  }, [currentStage]);
+
+  const handleRetry = useCallback(() => {
+    setPlayerHealth(1000);
+    setScore(0);
+    setCurrentStage(createStage(1));
+    setMessage('');
+    setIsAnimating(false);
+  }, []);
+
+  // 初期ローディング
+  if (!currentStage) {
+    return <div className="flex min-h-screen items-center justify-center">
+      <div className="text-2xl">Loading...</div>
+    </div>;
+  }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-100 to-pink-100 p-4">
-      <h1 className="text-4xl font-bold mb-8 text-purple-600">
-        Prime Factor Heroes
-      </h1>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-purple-900 via-purple-700 to-pink-800 p-4">
+      <div className="text-4xl font-bold mb-4 text-white">
+        Stage {currentStage.stageNumber}
+      </div>
 
-      <StatusBar health={playerHealth} score={score} />
+      <StatusBar 
+        health={playerHealth} 
+        score={score} 
+        maxHealth={1000}
+      />
 
-      {currentQuestion && (
-        <>
-          <div className="mb-8">
-            <NumberDisplay 
-              number={currentQuestion.number} 
-              isAnimating={isAnimating}
-              message={message} 
-            />
-          </div>
+      <NumberDisplay 
+        currentNumber={currentStage.currentNumber}
+        isAnimating={isAnimating}
+        message={message}
+        history={currentStage.history} initialNumber={0}      />
 
-          <InputArea 
-            onAnswer={handleAnswer}
-            currentNumber={currentQuestion.number}
-            difficulty={currentQuestion.difficulty}
-          />
-        </>
-      )}
+      <InputArea 
+        onPrimeSelect={handlePrimeSelect}
+        currentNumber={currentStage.currentNumber}
+        availablePrimes={getAvailablePrimes(currentStage.stageNumber)}
+      />
 
       {playerHealth <= 0 && (
-        <GameOver score={score} onRetry={() => {
-          setPlayerHealth(100);
-          setScore(0);
-          generateNewQuestion();
-        }} />
+        <GameOver 
+          score={score} 
+          stage={currentStage.stageNumber}
+          onRetry={handleRetry}
+        />
       )}
     </div>
   );
