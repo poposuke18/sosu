@@ -137,7 +137,6 @@ export const AudioManager = ({ children }: AudioManagerProps) => {
       <div className="fixed bottom-4 right-4 z-50">
         <Button
           variant="outline"
-          size="icon"
           onClick={toggleMute}
           className="rounded-full bg-white/90 shadow-md"
         >
