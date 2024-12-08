@@ -23,7 +23,6 @@ const AudioContext = createContext<AudioContextType>({
 });
 
 export const useAudio = () => useContext(AudioContext);
-
 interface AudioManagerProps {
   children: React.ReactNode;
 }
@@ -38,29 +37,44 @@ export const AudioManager = ({ children }: AudioManagerProps) => {
   const effectsRef = useRef<EffectType | null>(null);
   const [volume, setVolumeState] = useState(0.5);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   useEffect(() => {
-    effectsRef.current = {
-      correct: new Audio('/sounds/correct.mp3'),
-      wrong: new Audio('/sounds/wrong.mp3'),
-      stageClear: new Audio('/sounds/stage-clear.mp3'),
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    const initializeAudio = () => {
+      effectsRef.current = {
+        correct: new Audio('/sounds/correct.mp3'),
+        wrong: new Audio('/sounds/wrong.mp3'),
+        stageClear: new Audio('/sounds/stage-clear.mp3'),
+      };
+
+      bgmRef.current = new Audio('/sounds/BGM1.mp3');
+      if (bgmRef.current) {
+        bgmRef.current.loop = true;
+        bgmRef.current.volume = volume;
+        bgmRef.current.addEventListener('canplaythrough', () => {
+          setIsLoaded(true);
+          console.log('BGM loaded and ready to play');
+        });
+      }
+
+      if (effectsRef.current) {
+        Object.values(effectsRef.current).forEach(audio => {
+          audio.volume = volume;
+          // モバイルデバイス向けに空のタッチイベントを追加
+          if (isTouchDevice) {
+            audio.play().then(() => {
+              audio.pause();
+              audio.currentTime = 0;
+            }).catch(() => {});
+          }
+        });
+      }
     };
 
-    bgmRef.current = new Audio('/sounds/BGM1.mp3');
-    if (bgmRef.current) {
-      bgmRef.current.loop = true;
-      bgmRef.current.volume = volume;
-      bgmRef.current.addEventListener('canplaythrough', () => {
-        setIsLoaded(true);
-        console.log('BGM loaded and ready to play');
-      });
-    }
-
-    if (effectsRef.current) {
-      Object.values(effectsRef.current).forEach(audio => {
-        audio.volume = volume;
-      });
-    }
+    // ページロード時にオーディオを初期化
+    initializeAudio();
 
     return () => {
       if (bgmRef.current) {
@@ -69,18 +83,42 @@ export const AudioManager = ({ children }: AudioManagerProps) => {
     };
   }, [volume]);
 
+  useEffect(() => {
+    const handleInteraction = () => {
+      setHasInteracted(true);
+      // イベントリスナーを削除
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+    };
+
+    document.addEventListener('touchstart', handleInteraction);
+    document.addEventListener('click', handleInteraction);
+
+    return () => {
+      document.removeEventListener('touchstart', handleInteraction);
+      document.removeEventListener('click', handleInteraction);
+    };
+  }, []);
+
   const playBGM = useCallback(() => {
-    if (bgmRef.current && !isMuted && isLoaded) {
+    if (bgmRef.current && !isMuted && isLoaded && hasInteracted) {
       console.log('Attempting to play BGM');
       bgmRef.current.play()
         .then(() => console.log('BGM started playing successfully'))
         .catch(e => {
           console.error('BGM play failed:', e);
-          // ユーザーインタラクション後に再試行するためのフラグを設定
-          setIsLoaded(false);
+          // エラー時の再試行
+          const retryPlay = () => {
+            if (bgmRef.current && !isMuted) {
+              bgmRef.current.play().catch(() => {
+                setTimeout(retryPlay, 1000);
+              });
+            }
+          };
+          setTimeout(retryPlay, 1000);
         });
     }
-  }, [isMuted, isLoaded]);
+  }, [isMuted, isLoaded, hasInteracted]);
 
   const stopBGM = useCallback(() => {
     if (bgmRef.current) {
@@ -90,13 +128,13 @@ export const AudioManager = ({ children }: AudioManagerProps) => {
   }, []);
 
   const playEffect = useCallback((effectName: 'correct' | 'wrong' | 'stageClear') => {
-    if (effectsRef.current?.[effectName] && !isMuted) {
+    if (effectsRef.current?.[effectName] && !isMuted && hasInteracted) {
       effectsRef.current[effectName].currentTime = 0;
-      effectsRef.current[effectName].play().catch(e => 
-        console.error(`Effect ${effectName} play failed:`, e)
-      );
+      effectsRef.current[effectName].play().catch(e => {
+        console.error(`Effect ${effectName} play failed:`, e);
+      });
     }
-  }, [isMuted]);
+  }, [isMuted, hasInteracted]);
 
   const setVolume = useCallback((newVolume: number) => {
     setVolumeState(newVolume);
@@ -133,7 +171,6 @@ export const AudioManager = ({ children }: AudioManagerProps) => {
 
   return (
     <AudioContext.Provider value={contextValue}>
-      {/* サウンドコントロール */}
       <div className="fixed bottom-4 right-4 z-50">
         <Button
           variant="outline"
